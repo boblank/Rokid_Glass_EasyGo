@@ -11,6 +11,8 @@ import { guardPhysicalTap } from '../../lib/physical-tap-guard.js';
 
 export default {
   lastPhysicalEntryAt: null,
+  hardwareVoiceTimer: null,
+  hardwareVoiceGeneration: 0,
   pageActive: false,
 
   data: {
@@ -70,18 +72,21 @@ export default {
 
   onHide() {
     this.pageActive = false;
+    this.clearHardwareVoice();
     if (this.controller) this.controller.stopListening();
   },
 
   onShow() {
     if (!this.controller || this.controller.getSnapshot().destroyed) return false;
     this.lastPhysicalEntryAt = null;
+    this.clearHardwareVoice();
     this.pageActive = true;
     return true;
   },
 
   onUnload() {
     this.pageActive = false;
+    this.clearHardwareVoice();
     if (this.controller) this.controller.destroy();
   },
 
@@ -97,18 +102,76 @@ export default {
   onKeyDown(event) {
     const code = event && event.code;
     if (!this.pageActive) return false;
-    if (code === 'GlobalHook') {
-      console.log('HOME_HARDWARE_VOICE_TRIGGER', JSON.stringify({ code }));
-      return this.startListening();
+    if (code === 'GlobalHook') return this.scheduleHardwareVoice();
+    if (code === 'Backspace' || code === 'Escape') {
+      this.clearHardwareVoice();
+      console.log('HOME_ROOT_BACK_CONSUMED', JSON.stringify({ code }));
+      return true;
     }
-    if (code === 'ArrowLeft' || code === 'ArrowUp') return this.selectEntry('EASYGO', code);
-    if (code === 'ArrowRight' || code === 'ArrowDown') return this.selectEntry('MUSIC', code);
+    if (code === 'ArrowLeft' || code === 'ArrowUp') {
+      this.clearHardwareVoice();
+      return this.selectEntry('EASYGO', code);
+    }
+    if (code === 'ArrowRight' || code === 'ArrowDown') {
+      this.clearHardwareVoice();
+      return this.selectEntry('MUSIC', code);
+    }
     if (code !== 'Enter') return false;
+    this.clearHardwareVoice();
     const selectedEntry = this.data.selectedEntry === 'MUSIC' ? 'MUSIC' : 'EASYGO';
     console.log('HOME_HARDWARE_OPEN', JSON.stringify({ code, selectedEntry }));
     return selectedEntry === 'MUSIC'
       ? Boolean(this.controller && this.controller.goMusic('hardware'))
       : Boolean(this.controller && this.controller.goEasyGo('', 'hardware'));
+  },
+
+  onKeyUp(event) {
+    const code = event && event.code;
+    return Boolean(this.pageActive && (
+      code === 'GlobalHook' || code === 'Enter' ||
+      code === 'Backspace' || code === 'Escape' ||
+      code === 'ArrowLeft' || code === 'ArrowRight' ||
+      code === 'ArrowUp' || code === 'ArrowDown'
+    ));
+  },
+
+  scheduleHardwareVoice() {
+    if (this.hardwareVoiceTimer !== null) return true;
+    const generation = ++this.hardwareVoiceGeneration;
+    const schedule = this.hardwareSetTimeout || setTimeout;
+    let firedSynchronously = false;
+    const callback = () => {
+      firedSynchronously = true;
+      if (generation !== this.hardwareVoiceGeneration) return;
+      this.hardwareVoiceTimer = null;
+      if (!this.pageActive) return;
+      console.log('HOME_HARDWARE_VOICE_TRIGGER', JSON.stringify({
+        code: 'GlobalHook',
+        source: 'delayed-fallback',
+        delayMs: 650
+      }));
+      this.startListening();
+    };
+    const timer = schedule(callback, 650);
+    if (firedSynchronously) return true;
+    if (timer === null || timer === undefined) {
+      console.error('HOME_HARDWARE_VOICE_TIMER_FAILED');
+      return false;
+    }
+    this.hardwareVoiceTimer = timer;
+    console.log('HOME_HARDWARE_VOICE_PENDING', JSON.stringify({ delayMs: 650 }));
+    return true;
+  },
+
+  clearHardwareVoice() {
+    this.hardwareVoiceGeneration += 1;
+    if (this.hardwareVoiceTimer === null) return false;
+    const cancel = this.hardwareClearTimeout || clearTimeout;
+    try { cancel(this.hardwareVoiceTimer); } catch (error) {
+      console.error('HOME_HARDWARE_VOICE_TIMER_CLEAR_FAILED', error);
+    }
+    this.hardwareVoiceTimer = null;
+    return true;
   },
 
   selectEntry(selectedEntry, code = '') {
