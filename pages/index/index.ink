@@ -13,6 +13,7 @@ export default {
   lastPhysicalEntryAt: null,
   hardwareVoiceTimer: null,
   hardwareVoiceGeneration: 0,
+  hardwareGlobalHookPressed: false,
   pageActive: false,
 
   data: {
@@ -72,6 +73,7 @@ export default {
 
   onHide() {
     this.pageActive = false;
+    this.hardwareGlobalHookPressed = false;
     this.clearHardwareVoice();
     if (this.controller) this.controller.stopListening();
   },
@@ -79,6 +81,7 @@ export default {
   onShow() {
     if (!this.controller || this.controller.getSnapshot().destroyed) return false;
     this.lastPhysicalEntryAt = null;
+    this.hardwareGlobalHookPressed = false;
     this.clearHardwareVoice();
     this.pageActive = true;
     return true;
@@ -86,6 +89,7 @@ export default {
 
   onUnload() {
     this.pageActive = false;
+    this.hardwareGlobalHookPressed = false;
     this.clearHardwareVoice();
     if (this.controller) this.controller.destroy();
   },
@@ -102,7 +106,15 @@ export default {
   onKeyDown(event) {
     const code = event && event.code;
     if (!this.pageActive) return false;
-    if (code === 'GlobalHook') return this.scheduleHardwareVoice();
+    if (code === 'GlobalHook') {
+      if (this.hardwareGlobalHookPressed) return true;
+      this.hardwareGlobalHookPressed = true;
+      if (this.hardwareVoiceTimer !== null) {
+        this.clearHardwareVoice();
+        return this.pushRootBackGuard();
+      }
+      return this.scheduleHardwareVoice();
+    }
     if (code === 'Backspace' || code === 'Escape') {
       this.clearHardwareVoice();
       console.log('HOME_ROOT_BACK_CONSUMED', JSON.stringify({ code }));
@@ -127,12 +139,40 @@ export default {
 
   onKeyUp(event) {
     const code = event && event.code;
+    if (code === 'GlobalHook') this.hardwareGlobalHookPressed = false;
     return Boolean(this.pageActive && (
       code === 'GlobalHook' || code === 'Enter' ||
       code === 'Backspace' || code === 'Escape' ||
       code === 'ArrowLeft' || code === 'ArrowRight' ||
       code === 'ArrowUp' || code === 'ArrowDown'
     ));
+  },
+
+  pushRootBackGuard() {
+    if (!this.pageActive) return false;
+    let failureHandled = false;
+    const handleFailure = (error) => {
+      if (failureHandled) return;
+      failureHandled = true;
+      console.error('HOME_ROOT_BACK_GUARD_FAILED', error);
+    };
+    try {
+      const result = wx.navigateTo({
+        url: '/pages/index/index?source=root-back-guard',
+        fail: handleFailure
+      });
+      if (result === false) handleFailure(new Error('root back guard navigateTo returned false'));
+      if (result && typeof result.then === 'function') {
+        Promise.resolve(result).then((value) => {
+          if (value === false) handleFailure(new Error('root back guard navigateTo returned false'));
+        }, handleFailure);
+      }
+      console.log('HOME_ROOT_BACK_GUARD_PUSHED');
+      return true;
+    } catch (error) {
+      handleFailure(error);
+      return true;
+    }
   },
 
   scheduleHardwareVoice() {
