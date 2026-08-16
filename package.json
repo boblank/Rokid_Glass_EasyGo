@@ -1,0 +1,8 @@
+{
+  "name": "attention-back",
+  "version": "0.12.1",
+  "description": "Attention Back preliminary AIUI slice for Rokid Glasses",
+  "type": "module",
+  "main": "app.js",
+  "dependencies": {}
+}
